@@ -5,7 +5,7 @@
 ![Volume Boost at 200%](docs/screenshot.png)
 
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
-![Size: ~25 KB](https://img.shields.io/badge/size-~25%20KB-brightgreen)
+![Size: ~32 KB](https://img.shields.io/badge/size-~32%20KB-brightgreen)
 ![No ads · no account · no tracking](https://img.shields.io/badge/privacy-no%20ads%20%7C%20no%20account%20%7C%20no%20tracking-success)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
@@ -14,7 +14,7 @@ Why you might want it:
 - 💻 **Quiet laptop speakers** that are too soft even at 100%.
 - 🎬 **Films and shows** with dialogue you can barely hear.
 - 🎧 Works on **speakers or headphones** — whatever Windows is playing through.
-- 🪶 **Tiny and quiet:** one ~25 KB tray app, 0% CPU when idle, no account, no ads, no internet connection.
+- 🪶 **Tiny and quiet:** one ~32 KB tray app, 0% CPU when idle, no account, no ads, no internet connection.
 
 It's a single tray app for Windows 10/11. Under the hood it drives [Equalizer APO](https://sourceforge.net/projects/equalizerapo/), a free, trusted audio processor, to do the actual amplifying.
 
