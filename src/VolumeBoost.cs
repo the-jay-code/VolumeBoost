@@ -163,11 +163,191 @@ static class Program
     }
 }
 
+// Colours follow the Windows light/dark app setting
+class Theme
+{
+    public Color Back, Text, Muted, Track, Accent, Warm;
+
+    public static Theme Current()
+    {
+        bool light = true;
+        try
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                if (key != null && key.GetValue("AppsUseLightTheme") is int) light = (int)key.GetValue("AppsUseLightTheme") != 0;
+        }
+        catch { }
+        var t = new Theme();
+        t.Accent = Color.FromArgb(59, 130, 246);
+        t.Warm = Color.FromArgb(245, 158, 11);
+        if (light)
+        {
+            t.Back = Color.FromArgb(250, 250, 250); t.Text = Color.FromArgb(24, 24, 27);
+            t.Muted = Color.FromArgb(113, 113, 122); t.Track = Color.FromArgb(222, 222, 226);
+        }
+        else
+        {
+            t.Back = Color.FromArgb(28, 28, 30); t.Text = Color.FromArgb(244, 244, 245);
+            t.Muted = Color.FromArgb(150, 150, 158); t.Track = Color.FromArgb(58, 58, 62);
+        }
+        t.IsDark = !light;
+        return t;
+    }
+    public bool IsDark;
+}
+
+// Flat slider: thin rounded track, coloured fill, round thumb. Snaps to 5%.
+class BoostSlider : Control
+{
+    public const int Min = 100, Max = 400;
+    int value = 200;
+    bool dragging;
+    public Color Fill, Track, Thumb;
+    public event EventHandler ValueChanged;
+
+    public BoostSlider()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                 ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+        Cursor = Cursors.Hand;
+        TabStop = true;
+    }
+
+    public int Value
+    {
+        get { return value; }
+        set
+        {
+            int v = Math.Max(Min, Math.Min(Max, (int)Math.Round(value / 5.0) * 5));
+            if (v == this.value) return;
+            this.value = v;
+            Invalidate();
+            if (ValueChanged != null) ValueChanged(this, EventArgs.Empty);
+        }
+    }
+
+    int Radius { get { return Height / 3; } }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        int r = Radius, cy = Height / 2, left = r, right = Width - r;
+        float th = Math.Max(4f, Height / 7f);
+        float x = left + (right - left) * (value - Min) / (float)(Max - Min);
+        using (var b = new SolidBrush(Track)) FillPill(g, b, left, cy - th / 2, right - left, th);
+        using (var b = new SolidBrush(Fill)) FillPill(g, b, left, cy - th / 2, x - left, th);
+        using (var b = new SolidBrush(Thumb)) g.FillEllipse(b, x - r, cy - r, 2 * r, 2 * r);
+        using (var p = new Pen(Fill, Math.Max(2f, r / 3f))) g.DrawEllipse(p, x - r + 1, cy - r + 1, 2 * r - 2, 2 * r - 2);
+        if (Focused && ShowFocusCues)
+            using (var p = new Pen(Color.FromArgb(90, Fill), 2)) g.DrawEllipse(p, x - r - 3, cy - r - 3, 2 * r + 6, 2 * r + 6);
+    }
+
+    static void FillPill(Graphics g, Brush b, float x, float y, float w, float h)
+    {
+        if (w <= 0) return;
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+        {
+            float d = Math.Min(h, w);
+            path.AddArc(x, y, d, h, 90, 180);
+            path.AddArc(x + w - d, y, d, h, 270, 180);
+            path.CloseFigure();
+            g.FillPath(b, path);
+        }
+    }
+
+    void SetFromX(int x)
+    {
+        int r = Radius;
+        Value = Min + (int)Math.Round((x - r) * (Max - Min) / (double)Math.Max(1, Width - 2 * r));
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e) { Focus(); dragging = true; SetFromX(e.X); }
+    protected override void OnMouseMove(MouseEventArgs e) { if (dragging) SetFromX(e.X); }
+    protected override void OnMouseUp(MouseEventArgs e) { dragging = false; }
+    protected override void OnMouseWheel(MouseEventArgs e) { Value += e.Delta > 0 ? 5 : -5; }
+    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+    protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+    protected override bool IsInputKey(Keys k)
+    {
+        return k == Keys.Left || k == Keys.Right || k == Keys.Up || k == Keys.Down || base.IsInputKey(k);
+    }
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        switch (e.KeyCode)
+        {
+            case Keys.Left: case Keys.Down: Value -= 5; break;
+            case Keys.Right: case Keys.Up: Value += 5; break;
+            case Keys.PageDown: Value -= 25; break;
+            case Keys.PageUp: Value += 25; break;
+            case Keys.Home: Value = Min; break;
+            case Keys.End: Value = Max; break;
+        }
+    }
+}
+
+// Pill-shaped on/off switch
+class Toggle : Control
+{
+    bool on;
+    public Color OnColor, OffColor, Knob;
+    public event EventHandler CheckedChanged;
+
+    public Toggle()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                 ControlStyles.ResizeRedraw | ControlStyles.Selectable | ControlStyles.SupportsTransparentBackColor, true);
+        Cursor = Cursors.Hand;
+        TabStop = true;
+    }
+
+    public bool Checked
+    {
+        get { return on; }
+        set
+        {
+            if (value == on) return;
+            on = value;
+            Invalidate();
+            if (CheckedChanged != null) CheckedChanged(this, EventArgs.Empty);
+        }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        float h = Height - 2, w = Width - 2, pad = h / 6f, k = h - 2 * pad;
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+        {
+            path.AddArc(1, 1, h, h, 90, 180);
+            path.AddArc(1 + w - h, 1, h, h, 270, 180);
+            path.CloseFigure();
+            using (var b = new SolidBrush(on ? OnColor : OffColor)) g.FillPath(b, path);
+        }
+        float kx = on ? 1 + w - h + pad : 1 + pad;
+        using (var b = new SolidBrush(Knob)) g.FillEllipse(b, kx, 1 + pad, k, k);
+        if (Focused && ShowFocusCues)
+            using (var p = new Pen(Color.FromArgb(120, OnColor), 2)) g.DrawRectangle(p, 0, 0, Width - 1, Height - 1);
+    }
+
+    protected override void OnClick(EventArgs e) { Focus(); Checked = !Checked; base.OnClick(e); }
+    protected override void OnKeyDown(KeyEventArgs e) { if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter) Checked = !Checked; }
+    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+    protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+}
+
 class BoostForm : Form
 {
-    readonly TrackBar slider = new TrackBar();
-    readonly Label label = new Label();
-    readonly CheckBox onBox = new CheckBox();
+    const int WarnAbove = 300; // past this, loud sounds start to clip on most speakers
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    readonly Theme theme = Theme.Current();
+    readonly BoostSlider slider = new BoostSlider();
+    readonly Toggle toggle = new Toggle();
+    readonly Label big = new Label(), sub = new Label();
     readonly NotifyIcon tray = new NotifyIcon();
     readonly System.Windows.Forms.Timer debounce = new System.Windows.Forms.Timer();
     readonly ToolStripMenuItem trayToggle = new ToolStripMenuItem();
@@ -175,61 +355,59 @@ class BoostForm : Form
 
     public BoostForm(EventWaitHandle showSignal)
     {
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         Text = "Volume Boost";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-        ClientSize = new Size(420, 150);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        ClientSize = new Size(380, 190);
+        FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         TopMost = true;
+        BackColor = theme.Back;
+        ForeColor = theme.Text;
+        Font = new Font("Segoe UI", 9F);
 
-        label.Font = new Font("Segoe UI", 16, FontStyle.Bold);
-        label.AutoSize = true;
-        label.Location = new Point(15, 10);
+        big.Font = new Font("Segoe UI Light", 36F);
+        big.AutoSize = true;
+        big.Location = new Point(18, 14);
+        big.ForeColor = theme.Text;
+        sub.Font = new Font("Segoe UI", 9.75F);
+        sub.AutoSize = true;
+        sub.Location = new Point(25, 88);
 
-        onBox.Text = "Boost on";
-        onBox.Font = new Font("Segoe UI", 10);
-        onBox.AutoSize = true;
-        onBox.Location = new Point(310, 16);
+        toggle.Size = new Size(46, 26);
+        toggle.Location = new Point(310, 36);
+        toggle.OffColor = theme.Track;
+        toggle.Knob = Color.White;
 
-        slider.Minimum = 100;
-        slider.Maximum = 400;
-        slider.TickFrequency = 50;
-        slider.SmallChange = 5;
-        slider.LargeChange = 25;
-        slider.Width = 390;
-        slider.Location = new Point(15, 55);
+        slider.Size = new Size(340, 30);
+        slider.Location = new Point(20, 122);
+        slider.Track = theme.Track;
+        slider.Thumb = theme.Back;
 
-        var hint = new Label();
-        hint.Text = "100%        150%        200%        250%        300%        350%        400%";
-        hint.AutoSize = true;
-        hint.ForeColor = Color.Gray;
-        hint.Location = new Point(15, 100);
+        var min = MakeLabel("100%", new Font("Segoe UI", 8.25F), theme.Muted, 24, 156);
+        var max = MakeLabel("400%", new Font("Segoe UI", 8.25F), theme.Muted, 0, 160);
+        max.Location = new Point(356 - TextRenderer.MeasureText(max.Text, max.Font).Width + 4, 156);
 
-        var note = new Label();
-        note.Text = "Closing this window keeps the boost running in the tray (by the clock).";
-        note.AutoSize = true;
-        note.ForeColor = Color.Gray;
-        note.Location = new Point(15, 124);
-
-        Controls.AddRange(new Control[] { label, onBox, slider, hint, note });
+        Controls.AddRange(new Control[] { big, sub, toggle, slider, min, max });
 
         int percent; bool on;
         Program.LoadState(out percent, out on);
         slider.Value = percent;
-        onBox.Checked = on;
+        toggle.Checked = on;
         Program.ApplyBoost(percent, on);
-        RefreshText();
+        RefreshView();
 
         // Debounce so dragging doesn't rewrite the file dozens of times a second
         debounce.Interval = 120;
-        debounce.Tick += (s, e) => { debounce.Stop(); Program.ApplyBoost(slider.Value, onBox.Checked); };
-        slider.ValueChanged += (s, e) => { if (!onBox.Checked) onBox.Checked = true; RefreshText(); debounce.Stop(); debounce.Start(); };
-        onBox.CheckedChanged += (s, e) => { RefreshText(); Program.ApplyBoost(slider.Value, onBox.Checked); };
+        debounce.Tick += (s, e) => { debounce.Stop(); Program.ApplyBoost(slider.Value, toggle.Checked); };
+        slider.ValueChanged += (s, e) => { if (!toggle.Checked) toggle.Checked = true; RefreshView(); debounce.Stop(); debounce.Start(); };
+        toggle.CheckedChanged += (s, e) => { RefreshView(); Program.ApplyBoost(slider.Value, toggle.Checked); };
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open", null, (s, e) => ShowWindow());
-        trayToggle.Click += (s, e) => onBox.Checked = !onBox.Checked;
+        trayToggle.Click += (s, e) => toggle.Checked = !toggle.Checked;
         menu.Items.Add(trayToggle);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit (turns boost off)", null, (s, e) => { exiting = true; Close(); });
@@ -237,7 +415,7 @@ class BoostForm : Form
         tray.ContextMenuStrip = menu;
         tray.Visible = true;
         tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) ShowWindow(); };
-        RefreshText();
+        RefreshView();
 
         // Another launch of the app signals us to pop up
         ThreadPool.RegisterWaitForSingleObject(showSignal, (st, timedOut) =>
@@ -246,11 +424,38 @@ class BoostForm : Form
         }, null, -1, false);
     }
 
-    void RefreshText()
+    Label MakeLabel(string text, Font font, Color color, int x, int y)
     {
-        label.Text = onBox.Checked ? "Boost: " + slider.Value + "%" : "Boost: off";
-        trayToggle.Text = onBox.Checked ? "Turn boost off" : "Turn boost on";
-        tray.Text = "Volume Boost - " + (onBox.Checked ? slider.Value + "%" : "off");
+        return new Label { Text = text, Font = font, ForeColor = color, AutoSize = true, Location = new Point(x, y) };
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        int dark = theme.IsDark ? 1 : 0;
+        try { DwmSetWindowAttribute(Handle, 20, ref dark, 4); } catch { } // dark title bar on Windows 10 20H1+ / 11
+    }
+
+    void RefreshView()
+    {
+        bool on = toggle.Checked;
+        int v = slider.Value;
+        Color accent = v > WarnAbove ? theme.Warm : theme.Accent;
+        double db = 20 * Math.Log10(v / 100.0);
+
+        big.Text = v + "%";
+        big.ForeColor = on ? theme.Text : theme.Muted;
+        if (!on) { sub.Text = "Off  \u00B7  normal volume"; sub.ForeColor = theme.Muted; }
+        else if (v > WarnAbove) { sub.Text = "+" + db.ToString("0.0") + " dB  \u00B7  may crackle on loud sounds"; sub.ForeColor = theme.Warm; }
+        else { sub.Text = "+" + db.ToString("0.0") + " dB louder"; sub.ForeColor = theme.Muted; }
+
+        slider.Fill = on ? accent : theme.Muted;
+        toggle.OnColor = accent;
+        slider.Invalidate();
+        toggle.Invalidate();
+
+        trayToggle.Text = on ? "Turn boost off" : "Turn boost on";
+        tray.Text = "Volume Boost - " + (on ? v + "%" : "off");
     }
 
     void ShowWindow()
@@ -266,10 +471,16 @@ class BoostForm : Form
         {
             e.Cancel = true;
             Hide();
+            if (!toldAboutTray)
+            {
+                toldAboutTray = true;
+                tray.ShowBalloonTip(3000, "Volume Boost is still on", "It keeps running here. Right-click to exit.", ToolTipIcon.None);
+            }
             return;
         }
         Program.ApplyBoost(slider.Value, false, false); // remember the level for next launch
         tray.Visible = false;
         base.OnFormClosing(e);
     }
+    bool toldAboutTray;
 }
